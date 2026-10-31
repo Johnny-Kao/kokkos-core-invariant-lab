@@ -55,6 +55,10 @@ jobs:
         env:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ./build/probe/mdrange_invariant_probe --boundary
+      - name: Observe release-like tile count
+        id: plain_boundary
+        continue-on-error: true
+        run: ./build/probe/mdrange_invariant_probe_plain --boundary
       - name: Record result without disguising diagnostic
         if: always()
         run: |
@@ -63,3 +67,4 @@ jobs:
           else
             echo "Boundary check passed; inspect actual tile count and compiler output." >> "$GITHUB_STEP_SUMMARY"
           fi
+          echo "Plain optimized boundary outcome: ${{ steps.plain_boundary.outcome }}" >> "$GITHUB_STEP_SUMMARY"
