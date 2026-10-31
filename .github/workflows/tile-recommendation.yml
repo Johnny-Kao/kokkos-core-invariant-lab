@@ -1,0 +1,79 @@
+name: MDRange Default Tile Recommendation Overflow A-B
+on:
+  push:
+    paths:
+      - .github/workflows/tile-recommendation.yml
+      - tile_recommendation/probe.cpp
+      - tile_recommendation/CMakeLists.txt
+  workflow_dispatch:
+
+jobs:
+  pre-post-9650:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        revision:
+          - label: pre-9650
+            ref: 675433c879a1a19ecf48338a727d16b8bfbf8ff9
+          - label: post-9650
+            ref: 1e08552799ab366f3037ce7ad46cc8d3ca85498d
+    name: ${{ matrix.compiler }} / ${{ matrix.revision.label }}
+    steps:
+      - name: Checkout independent research probe
+        uses: actions/checkout@v4
+      - name: Checkout pinned original Kokkos source
+        uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: ${{ matrix.revision.ref }}
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+      - name: Configure Kokkos Serial backend
+        run: |
+          cmake -S kokkos -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=OFF \
+            -DKokkos_ENABLE_TESTS=OFF \
+            -DKokkos_ENABLE_EXAMPLES=OFF
+      - name: Build and install
+        run: |
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Build UBSan probe
+        run: |
+          cmake -S tile_recommendation -B build/probe \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/probe --parallel 2
+      - name: Ordinary small explicit tile range
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ./build/probe/tile_recommendation_probe
+      - name: Large but legal range with explicit small tiles (expect UBSan)
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          set +e
+          ./build/probe/tile_recommendation_probe --boundary > boundary.log 2>&1
+          result=$?
+          set -e
+          cat boundary.log
+          echo "Result code: $result"
+          echo "Pinned source: ${{ matrix.revision.label }} at ${{ matrix.revision.ref }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$result" -eq 0 ]; then
+            echo "No sanitizer failure: inspect constructed output" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if ! grep -q "signed integer overflow: 2147483647 \* 2" boundary.log; then
+            echo "Failed for an unexpected reason; check log" >> "$GITHUB_STEP_SUMMARY"
+            exit 2
+          fi
+          echo "Confirmed: 2147483647 * 2 signed integer overflow with explicit small tiles" >> "$GITHUB_STEP_SUMMARY"
