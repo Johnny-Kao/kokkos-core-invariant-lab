@@ -1,0 +1,32 @@
+name: Format check for Kokkos PR 9725
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/format-pr-9725.yml
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Kokkos fork PR branch
+        uses: actions/checkout@v4
+        with:
+          repository: Johnny-Kao/kokkos
+          ref: fix/mdrange-default-tile-recommendation-overflow
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check clang-format version
+        run: |
+          if ! command -v clang-format-16 >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y clang-format-16
+          fi
+          clang-format-16 --version
+      - name: Show precise upstream clang-format corrections
+        run: |
+          clang-format-16 -i core/src/KokkosExp_MDRangePolicy.hpp core/unit_test/TestMDRangePolicyConstructors.hpp
+          git diff --check
+          git diff -- core/src/KokkosExp_MDRangePolicy.hpp core/unit_test/TestMDRangePolicyConstructors.hpp
+          git diff --stat
