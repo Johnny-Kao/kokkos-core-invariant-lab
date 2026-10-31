@@ -1,14 +1,16 @@
-name: MDRange Default Tile Recommendation Overflow A-B
+name: Verify pre-existing MDRange tile recommendation fix
+
 on:
   push:
     paths:
-      - .github/workflows/tile-recommendation.yml
-      - tile_recommendation/probe.cpp
-      - tile_recommendation/CMakeLists.txt
+      - ".github/workflows/tile-recommendation.yml"
+      - "tile_recommendation/probe.cpp"
+      - "tile_recommendation/CMakeLists.txt"
+      - "candidate/tilesize-recommendation-bounded-product.patch"
   workflow_dispatch:
 
 jobs:
-  pre-post-9650:
+  before-after-fix:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -22,9 +24,9 @@ jobs:
             ref: 1e08552799ab366f3037ce7ad46cc8d3ca85498d
     name: ${{ matrix.compiler }} / ${{ matrix.revision.label }}
     steps:
-      - name: Checkout independent research probe
+      - name: Checkout research probe
         uses: actions/checkout@v4
-      - name: Checkout pinned original Kokkos source
+      - name: Checkout pinned upstream Kokkos (no writes back to upstream)
         uses: actions/checkout@v4
         with:
           repository: kokkos/kokkos
@@ -42,38 +44,50 @@ jobs:
             -DKokkos_ENABLE_OPENMP=OFF \
             -DKokkos_ENABLE_TESTS=OFF \
             -DKokkos_ENABLE_EXAMPLES=OFF
-      - name: Build and install
+      - name: Build and install unpatched Kokkos
         run: |
           cmake --build build/kokkos --parallel 2
           cmake --install build/kokkos
-      - name: Build UBSan probe
+      - name: Build sanitizer probe
         run: |
           cmake -S tile_recommendation -B build/probe \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
           cmake --build build/probe --parallel 2
-      - name: Ordinary small explicit tile range
+      - name: Verify unpatched ordinary range
         env:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ./build/probe/tile_recommendation_probe
-      - name: Large but legal range with explicit small tiles (expect UBSan)
+      - name: Confirm unpatched legal boundary fails specifically in recommender
         env:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: |
           set +e
-          ./build/probe/tile_recommendation_probe --boundary > boundary.log 2>&1
-          result=$?
+          ./build/probe/tile_recommendation_probe --boundary > unpatched.log 2>&1
+          code=$?
           set -e
-          cat boundary.log
-          echo "Result code: $result"
-          echo "Pinned source: ${{ matrix.revision.label }} at ${{ matrix.revision.ref }}" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$result" -eq 0 ]; then
-            echo "No sanitizer failure: inspect constructed output" >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          if ! grep -q "signed integer overflow: 2147483647 \* 2" boundary.log; then
-            echo "Failed for an unexpected reason; check log" >> "$GITHUB_STEP_SUMMARY"
-            exit 2
-          fi
-          echo "Confirmed: 2147483647 * 2 signed integer overflow with explicit small tiles" >> "$GITHUB_STEP_SUMMARY"
+          cat unpatched.log
+          test "$code" -ne 0
+          grep -F "signed integer overflow: 2147483646 * 2" unpatched.log
+      - name: Apply only one-line recommender candidate
+        run: |
+          git -C kokkos apply --check "$GITHUB_WORKSPACE/candidate/tilesize-recommendation-bounded-product.patch"
+          git -C kokkos apply "$GITHUB_WORKSPACE/candidate/tilesize-recommendation-bounded-product.patch"
+          git -C kokkos diff --check
+          git -C kokkos diff --stat
+      - name: Rebuild and reinstall patched Kokkos
+        run: |
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+          cmake --build build/probe --clean-first --parallel 2
+      - name: Verify patched ordinary range
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ./build/probe/tile_recommendation_probe
+      - name: Verify patched legal boundary with sanitizer
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          ./build/probe/tile_recommendation_probe --boundary
+          echo "PASS: old revision ${{ matrix.revision.label }}, compiler ${{ matrix.compiler }}: same input fails pre-fix and passes after 1-line fix" >> "$GITHUB_STEP_SUMMARY"
