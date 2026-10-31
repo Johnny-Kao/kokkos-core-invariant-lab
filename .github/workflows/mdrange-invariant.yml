@@ -1,0 +1,65 @@
+name: MDRange Invariant
+
+on:
+  push:
+    paths:
+      - ".github/workflows/mdrange-invariant.yml"
+      - "CMakeLists.txt"
+      - "mdrange_invariant_probe.cpp"
+  workflow_dispatch:
+
+jobs:
+  source-invariant:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - name: Checkout research probe
+        uses: actions/checkout@v4
+      - name: Checkout pinned Kokkos
+        uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: 1e08552799ab366f3037ce7ad46cc8d3ca85498d
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+      - name: Configure Kokkos Serial backend
+        run: |
+          cmake -S kokkos -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=OFF \
+            -DKokkos_ENABLE_TESTS=OFF \
+            -DKokkos_ENABLE_EXAMPLES=OFF
+      - name: Build and install Kokkos
+        run: |
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Build UBSan-enabled probe
+        run: |
+          cmake -S . -B build/probe \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/probe --parallel 2
+      - name: Verify ordinary-range baseline
+        run: ./build/probe/mdrange_invariant_probe
+      - name: Diagnose legal index boundary
+        id: boundary
+        continue-on-error: true
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ./build/probe/mdrange_invariant_probe --boundary
+      - name: Record result without disguising diagnostic
+        if: always()
+        run: |
+          if [ "${{ steps.boundary.outcome }}" = "failure" ]; then
+            echo "Boundary check failed; inspect UBSan output above." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Boundary check passed; inspect actual tile count and compiler output." >> "$GITHUB_STEP_SUMMARY"
+          fi
