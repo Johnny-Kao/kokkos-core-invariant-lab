@@ -1,0 +1,74 @@
+name: Tile Boundary Independent Reproduction
+on:
+  push:
+    paths:
+      - ".github/workflows/tile-boundary.yml"
+      - "tile_boundary/CMakeLists.txt"
+      - "tile_boundary_probe.cpp"
+  workflow_dispatch:
+jobs:
+  tile-boundary:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        source:
+          - label: pre-9650
+            ref: 675433c879a1a19ecf48338a727d16b8bfbf8ff9
+          - label: develop-20261031
+            ref: 1e08552799ab366f3037ce7ad46cc8d3ca85498d
+    name: ${{ matrix.compiler }} / ${{ matrix.source.label }}
+    steps:
+      - name: Checkout research-only files
+        uses: actions/checkout@v4
+      - name: Checkout pinned upstream (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: ${{ matrix.source.ref }}
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+      - name: Configure Kokkos Serial backend
+        run: |
+          cmake -S kokkos -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=OFF \
+            -DKokkos_ENABLE_TESTS=OFF \
+            -DKokkos_ENABLE_EXAMPLES=OFF
+      - name: Build Kokkos
+        run: |
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Build test executables
+        run: |
+          cmake -S tile_boundary -B build/tile_boundary \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/tile_boundary --parallel 2
+      - name: Baseline one-element workload
+        run: |
+          ./build/tile_boundary/tile_boundary_probe
+          ./build/tile_boundary/tile_boundary_probe_plain
+      - name: Boundary workload, signed-overflow sanitizer
+        id: sanitizer
+        continue-on-error: true
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: timeout 10s ./build/tile_boundary/tile_boundary_probe --boundary
+      - name: Boundary workload, optimized behavior
+        id: optimized
+        continue-on-error: true
+        run: timeout 10s ./build/tile_boundary/tile_boundary_probe_plain --boundary
+      - name: Record all diagnostic outcomes
+        if: always()
+        run: |
+          echo "Source: ${{ matrix.source.label }} (${{ matrix.source.ref }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "Compiler: ${{ matrix.compiler }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Sanitized boundary outcome: ${{ steps.sanitizer.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Optimized boundary outcome: ${{ steps.optimized.outcome }}" >> "$GITHUB_STEP_SUMMARY"
