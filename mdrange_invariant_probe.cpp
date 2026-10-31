@@ -1,5 +1,4 @@
 #include <Kokkos_Core.hpp>
-#include <KokkosExp_MDRangePolicy.hpp>
 
 #include <cstdint>
 #include <iostream>
