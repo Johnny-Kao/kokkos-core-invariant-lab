@@ -51,6 +51,21 @@ int main(int argc, char** argv) {
       Kokkos::fence();
       std::cout << "boundary-range calls=" << calls << " out=" << out << " expected=1\\n";
       if (calls != 1 || out) status = 11;
+    } else if (mode == "baseline-range-reduce" || mode == "boundary-range-reduce") {
+      const bool boundary = mode == "boundary-range-reduce";
+      const I begin = boundary ? hi-1 : 0;
+      const I end = boundary ? hi : 1024;
+      const std::int64_t expected = boundary ? 1 : 1024;
+      RP p(begin, end, Kokkos::ChunkSize(1));
+      std::int64_t total = 0;
+      Kokkos::parallel_reduce(mode, p, [&](I i, std::int64_t& acc) {
+        acc += 1;
+        calls.fetch_add(1);
+        if (i < begin || i >= end) out.fetch_add(1);
+      }, total);
+      Kokkos::fence();
+      std::cout << mode << " reduction=" << total << " calls=" << calls << " out=" << out << " expected=" << expected << "\\n";
+      if (total != expected || calls != expected || out) status = 14;
     } else if (mode == "boundary-md-for" || mode == "boundary-md-reduce") {
       MP p({hi-1, 0}, {hi, 1}, {4, 1});
       if (mode == "boundary-md-for") {
