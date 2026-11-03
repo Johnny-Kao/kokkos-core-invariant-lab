@@ -54,7 +54,7 @@ jobs:
           set +e
           printf 'case,exit_code\n' > audit-results.csv
           echo '## Kokkos core arithmetic audit — ${{ matrix.compiler }}' >> "$GITHUB_STEP_SUMMARY"
-          for c in baseline-auto baseline-workrange boundary-auto boundary-workrange boundary-negative-origin; do
+          for c in baseline-auto baseline-workrange boundary-auto boundary-workrange boundary-negative-origin small-workrange-high-origin; do
             echo "::group::$c"
             timeout 10s ./build/audit/core_arithmetic_audit "$c"
             status=$?
