@@ -35,7 +35,7 @@ jobs:
           cmake -S kokkos -B build/kokkos -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
-            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_SERIAL=${{ matrix.backend == 'SERIAL' && 'ON' || 'OFF' }} \
             -DKokkos_ENABLE_OPENMP=${{ matrix.backend == 'OPENMP' && 'ON' || 'OFF' }} \
             -DKokkos_ENABLE_THREADS=${{ matrix.backend == 'THREADS' && 'ON' || 'OFF' }} \
             -DKokkos_ENABLE_TESTS=OFF -DKokkos_ENABLE_EXAMPLES=OFF
