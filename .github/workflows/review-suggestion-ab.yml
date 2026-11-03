@@ -1,0 +1,96 @@
+name: Review Suggestion A-B Validation
+on:
+  push:
+    paths:
+      - ".github/workflows/review-suggestion-ab.yml"
+      - "review_audit/**"
+  workflow_dispatch:
+jobs:
+  reviewer-ab:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: g++
+            backend: SERIAL
+          - compiler: clang++
+            backend: SERIAL
+          - compiler: g++
+            backend: OPENMP
+          - compiler: g++
+            backend: THREADS
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: 1e08552799ab366f3037ce7ad46cc8d3ca85498d
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+      - name: Build pinned Kokkos baseline libraries once per backend
+        shell: bash
+        run: |
+          cmake -S kokkos -B build/kokkos -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=${{ matrix.backend == 'OPENMP' && 'ON' || 'OFF' }} \
+            -DKokkos_ENABLE_THREADS=${{ matrix.backend == 'THREADS' && 'ON' || 'OFF' }} \
+            -DKokkos_ENABLE_TESTS=OFF -DKokkos_ENABLE_EXAMPLES=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Generate isolated header variants using exact reviewer edits
+        run: python3 review_audit/build_header_variants.py install review_audit/variants
+      - name: Compile all 3 variants with optimized and UBSan probe
+        shell: bash
+        run: |
+          cat > review_audit/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.25)
+          project(review_suggestion_AB LANGUAGES CXX)
+          find_package(Kokkos CONFIG REQUIRED)
+          foreach(variant IN ITEMS original pr_only reviewed)
+            foreach(sanitizer IN ITEMS plain ubsan)
+              set(target probe_${variant}_${sanitizer})
+              add_executable(${target} reviewer_policy_probe.cpp)
+              target_include_directories(${target} BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/variants/${variant}/include")
+              target_link_libraries(${target} PRIVATE Kokkos::kokkos)
+              target_compile_features(${target} PRIVATE cxx_std_20)
+              if(sanitizer STREQUAL "ubsan")
+                target_compile_options(${target} PRIVATE -O1 -g -fsanitize=signed-integer-overflow -fno-sanitize-recover=signed-integer-overflow)
+                target_link_options(${target} PRIVATE -fsanitize=signed-integer-overflow)
+              else()
+                target_compile_options(${target} PRIVATE -O2)
+              endif()
+            endforeach()
+          endforeach()
+          EOF
+          cmake -S review_audit -B build/audit -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/audit --parallel 2
+      - name: Execute variant matrix, record diagnostic and abort exits
+        shell: bash
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          OMP_PROC_BIND: "false"
+        run: |
+          set +e
+          printf 'compiler,backend,variant,mode,case,exit_code\n' > reviewer-ab.csv
+          for variant in original pr_only reviewed; do
+            for mode in plain ubsan; do
+              for case in normal pr-explicit review-noexplicit actual-product-overlimit tile-too-wide-for-int division-boundary-contract; do
+                echo "::group::${{ matrix.backend }}/${{ matrix.compiler }} $variant $mode $case"
+                timeout 6s ./build/audit/probe_${variant}_${mode} "$case"
+                rc=$?
+                echo "${{ matrix.compiler }},${{ matrix.backend }},$variant,$mode,$case,$rc" | tee -a reviewer-ab.csv
+                echo "::endgroup::"
+              done
+            done
+          done
+          cat reviewer-ab.csv >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reviewer-ab-${{ matrix.backend }}-${{ matrix.compiler }}
+          path: reviewer-ab.csv
