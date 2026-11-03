@@ -50,7 +50,7 @@ jobs:
           cmake_minimum_required(VERSION 3.25)
           project(review_suggestion_AB LANGUAGES CXX)
           find_package(Kokkos CONFIG REQUIRED)
-          foreach(variant IN ITEMS original pr_only reviewed)
+          foreach(variant IN ITEMS original pr_only reviewed complete_arithmetic)
             foreach(sanitizer IN ITEMS plain ubsan)
               set(target probe_${variant}_${sanitizer})
               add_executable(${target} reviewer_policy_probe.cpp)
@@ -76,7 +76,7 @@ jobs:
         run: |
           set +e
           printf 'compiler,backend,variant,mode,case,exit_code\n' > reviewer-ab.csv
-          for variant in original pr_only reviewed; do
+          for variant in original pr_only reviewed complete_arithmetic; do
             for mode in plain ubsan; do
               for case in normal pr-explicit review-noexplicit actual-product-overlimit tile-too-wide-for-int division-boundary-contract; do
                 echo "::group::${{ matrix.backend }}/${{ matrix.compiler }} $variant $mode $case"
