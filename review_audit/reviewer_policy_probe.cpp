@@ -1,5 +1,7 @@
 // Small/large-number policy construction only; no huge parallel kernels.
 #include <Kokkos_Core.hpp>
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -43,6 +45,36 @@ int main(int argc, char** argv) {
       Wide p({0,0},{1,n},{1,n});
       std::cout<<"tile-too-wide-for-int unexpectedly accepted: "<<p.impl_num_tiles()<<'\n';
       rc=7;
+    } else if (kind == "actual-md-parallel-reduce-tile1" ||
+               kind == "actual-md-parallel-reduce-tile4") {
+      const int tile = kind == "actual-md-parallel-reduce-tile1" ? 1 : 4;
+      P p({mx-1,0}, {mx,1}, {tile,1});
+      std::atomic<int> calls{0}, invalid{0};
+      std::int64_t result = 0;
+      Kokkos::parallel_reduce("review-audit-execution", p,
+          [&](I i, I j, std::int64_t& update) {
+            calls.fetch_add(1);
+            if (i != mx-1 || j != 0) invalid.fetch_add(1);
+            update += 1;
+          }, result);
+      Kokkos::fence();
+      std::cout << kind << " result=" << result << " calls=" << calls
+                << " invalid=" << invalid << " expected=1\n";
+      rc = result == 1 && calls == 1 && invalid == 0 ? 0 : 9;
+    } else if (kind == "construct-bench") {
+      constexpr int rounds = 100000;
+      std::int64_t checksum = 0;
+      const auto begin = std::chrono::steady_clock::now();
+      for (int i=0;i<rounds;++i) {
+        // Vary bounds so the optimizer cannot fold an invariant constructor.
+        P p({0,0},{16+i%7,16},{4,4});
+        checksum += p.impl_num_tiles();
+      }
+      const auto end = std::chrono::steady_clock::now();
+      const auto us=std::chrono::duration_cast<std::chrono::microseconds>(end-begin).count();
+      std::cout << "construct-bench iterations=" << rounds << " us=" << us
+                << " checksum=" << checksum << '\n';
+      rc=checksum>0?0:10;
     } else if (kind == "division-boundary-contract") {
       // At equality, '<' is different from '<='. Reviewer proposed '<',
       // but current <= policy accepts tile dimension exactly equal to cap.
