@@ -78,7 +78,7 @@ jobs:
           printf 'compiler,backend,variant,mode,case,exit_code\n' > reviewer-ab.csv
           for variant in original pr_only reviewed complete_arithmetic; do
             for mode in plain ubsan; do
-              for case in normal pr-explicit review-noexplicit actual-product-overlimit tile-too-wide-for-int division-boundary-contract; do
+              for case in normal pr-explicit review-noexplicit actual-product-overlimit tile-too-wide-for-int division-boundary-contract actual-md-parallel-reduce-tile1 actual-md-parallel-reduce-tile4 construct-bench; do
                 echo "::group::${{ matrix.backend }}/${{ matrix.compiler }} $variant $mode $case"
                 timeout 6s ./build/audit/probe_${variant}_${mode} "$case"
                 rc=$?
