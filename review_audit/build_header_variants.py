@@ -56,3 +56,12 @@ reviewed = subst(reviewed, review_b_old, review_b_new, "review default shrinking
 reviewed = subst(reviewed, review_actual_old, review_actual_new, "review actual tile product guard")
 make_variant("reviewed", reviewed)
 print("All 3 variants use original pinned Kokkos headers, PR suggestion and isolated reviewed candidate.")
+
+# The reviewer's no-explicit-tile test also reaches this independent
+# addition overflow. Only the 'complete_arithmetic' candidate includes it.
+ceil_old = """      this->m_tile_end[i] = static_cast<index_type>(
+          (length + this->m_tile[i] - 1) / this->m_tile[i]);"""
+ceil_new = """      this->m_tile_end[i] = static_cast<index_type>(
+          length / this->m_tile[i] + (length % this->m_tile[i] != 0));"""
+complete = subst(reviewed, ceil_old, ceil_new, "ceil division without overflow")
+make_variant("complete_arithmetic", complete)
