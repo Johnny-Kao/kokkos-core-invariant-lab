@@ -49,3 +49,11 @@ The OpenMP/Clang job in the initial workflow failed at CMake configuration becau
 3. Perform isolated A/B patches on pinned source in the research repo, verifying that original baseline behavior is preserved and boundary calls/count/reduction become correct.
 4. Review whether internal OpenMP HostThreadTeam work partition exhibits an independent large-index issue; it is not the cause of the one-element OpenMP RangePolicy control.
 5. Do not broaden upstream #9725 or claim all historical computations are affected without corresponding input conditions and backend confirmation.
+
+## Follow-up: RangePolicy actual numerical reduction is also wrong on Threads
+
+Additional run: https://github.com/Johnny-Kao/kokkos-core-invariant-lab/actions/runs/41618217187
+
+With `RangePolicy<Threads, IndexType<int32_t>>`, `[INT32_MAX-1, INT32_MAX)`, explicit `ChunkSize(1)`, a real `Kokkos::parallel_reduce` returning the number of visits reports **3 instead of the correct 1**. This occurs under GCC and Clang optimized builds with 4 host threads. Exactly 3 functor calls occurred; 2 indices were out of the declared range. UBSan in both compilers points at `Kokkos_ExecPolicy.hpp:338`. Ordinary 1024-element reduction correctly reports 1024. No data races were needed to produce this deviation: the test uses atomic counters and the documented reduction update.
+
+Therefore **both independent problems** (MDRangePolicy HostIterateTile and RangePolicy WorkRange on Threads) have confirmed wrong numerical reduction results on real parallel execution paths. This is distinct from the hypotheses about overlapping application writes, which remain untested.
