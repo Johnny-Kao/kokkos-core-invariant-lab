@@ -48,3 +48,40 @@ Do **not** immediately apply every GitHub inline suggestion verbatim to upstream
 - HostTile isolated runtime patch A/B is being run in a separate CI revision; only claim verified after reading its completed logs.
 - Latest CUDA/HIP/SYCL compilation/runtime, 64-bit extreme index coverage, floating-point heterogeneous reductions, TSAN overlap/race assessment, long-run multithread nondeterminism, and formal maintainer agreement remain outstanding.
 - No historic scientific result has been traced to this input-specific bug. Do not recommend blanket recomputation without matching affected version/backend/index/tile choices.
+
+## Verified second-stage isolated runtime A/B — completed
+
+Latest full 5-variant run: https://github.com/Johnny-Kao/kokkos-core-invariant-lab/actions/runs/41644335934
+
+All four job matrices completed (GCC Serial, Clang Serial, GCC OpenMP-only, GCC Threads-only). This is a **pinned source research candidate, not an upstream patch**.
+
+| Scenario | complete_arithmetic (reviewer + ceil fix) | complete_plus_host (same + HostIterateTile guarded subtraction comparison) |
+| --- | --- | --- |
+| Normal policy construction | PASS | PASS |
+| Explicit recommended tile, near INT32_MAX | PASS | PASS |
+| Reviewer's no-explicit-tile construction | PASS | PASS |
+| Real high-index MDRange parallel_reduce tile=1 | 1 (correct) | 1 (correct) |
+| Real high-index MDRange parallel_reduce tile=4 | **4 (wrong; 3 out-of-domain)** | **1 (correct; 0 out-of-domain)** |
+| UBSan of above tile=4 | signed overflow at HostIterateTile:1221 | PASS, no signed overflow in this repro |
+| Actual tile product 46341*46341 | deliberate `Kokkos::abort` | deliberate `Kokkos::abort` |
+| Tile width > INT_MAX | deliberate `Kokkos::abort` | deliberate `Kokkos::abort` |
+
+Both optimized and UBSan binaries show the above result across the four toolchain/backend combinations. The runtime-only adjustment replaces `(offset[i]+m_tile[i])<=m_upper[i]` with `m_tile[i]<=m_upper[i]-offset[i]` in `HostIterateTile::check_iteration_bounds`. This comparison is separate from the #9725 recommendation overflow and is **not** a proof that all multi-dimensional scheduling variants are safe.
+
+### Scope decision based on evidence
+
+- **Accept in concept:** reviewer recommendation to move explicit tile multiplication safety checks before the product; tests show this prevents UB and deliberate aborts over-limit input. The exact guard must be reviewed for index type conversion and API semantics.
+- **Accept:** tests should use `DefaultHostExecutionSpace` where host coverage is desired, not assume `Kokkos::Serial`.
+- **Accept with adjustment:** reviewer division comparison should retain `<=` for equality rather than `<`, preserving the original cap semantics.
+- **Do not accept verbatim as sufficient:** reviewer suggestions plus existing PR only are insufficient for the new no-explicit-tile test; the independent overflow-safe ceil-division fix is required.
+- **Split:** widen all tile bookkeeping types only after reviewing GPU constraints and semantics.
+- **Split:** HostIterateTile runtime execution defect and separate Threads WorkRange defect; they do not become correct merely because #9725 constructor code is repaired.
+- **Not fully cleared:** latest GPU CI, TSAN overlap, multi-billion-element real workloads, stable performance benchmarking. In particular, do **not** assert all six research gates are complete.
+
+### Numbers of cases
+
+The latest run has 4 jobs × 5 variants × 2 builds (optimized and UBSan) × 9 cases = **360 diagnostic case invocations**. The expected nonzero exits include intentional abort of over-limit inputs and expected failures of the unpatched control; no false claim that all individual cases passed.
+
+Prior run of [Numerical Concurrency Audit](https://github.com/Johnny-Kao/kokkos-core-invariant-lab/actions/runs/41619708733) demonstrates under real thread pools that Threads RangePolicy can produce numerical deviation increasing with thread count; review code in #9725 is unrelated to fixing that defect.
+
+The benchmark is a basic CI screening test only: policy construction results share the same checksum, but throughput measurements are not robust enough to claim a negligible or stable performance cost.
