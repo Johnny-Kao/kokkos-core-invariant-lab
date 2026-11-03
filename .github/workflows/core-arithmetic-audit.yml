@@ -1,0 +1,71 @@
+name: Core Arithmetic Audit
+on:
+  push:
+    paths:
+      - ".github/workflows/core-arithmetic-audit.yml"
+      - "core_arithmetic_audit.cpp"
+  workflow_dispatch:
+
+jobs:
+  range-policy-arithmetic:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: 1e08552799ab366f3037ce7ad46cc8d3ca85498d
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+      - name: Build isolated pinned Kokkos Serial
+        shell: bash
+        run: |
+          cmake -S kokkos -B build/kokkos -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" -DKokkos_ENABLE_SERIAL=ON -DKokkos_ENABLE_OPENMP=OFF -DKokkos_ENABLE_TESTS=OFF -DKokkos_ENABLE_EXAMPLES=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Compile probe with UBSan
+        shell: bash
+        run: |
+          cat > audit-CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.25)
+          project(kokkos_core_arithmetic_audit LANGUAGES CXX)
+          find_package(Kokkos REQUIRED CONFIG)
+          add_executable(core_arithmetic_audit core_arithmetic_audit.cpp)
+          target_link_libraries(core_arithmetic_audit PRIVATE Kokkos::kokkos)
+          target_compile_features(core_arithmetic_audit PRIVATE cxx_std_20)
+          target_compile_options(core_arithmetic_audit PRIVATE -O1 -g -fsanitize=signed-integer-overflow -fno-sanitize-recover=signed-integer-overflow -fno-omit-frame-pointer)
+          target_link_options(core_arithmetic_audit PRIVATE -fsanitize=signed-integer-overflow)
+          EOF
+          mkdir -p audit
+          cp audit-CMakeLists.txt audit/CMakeLists.txt
+          cp core_arithmetic_audit.cpp audit/core_arithmetic_audit.cpp
+          cmake -S audit -B build/audit -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/audit --parallel 2
+      - name: Run all isolated probes and preserve failures
+        shell: bash
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          set +e
+          printf 'case,exit_code\n' > audit-results.csv
+          echo '## Kokkos core arithmetic audit — ${{ matrix.compiler }}' >> "$GITHUB_STEP_SUMMARY"
+          for c in baseline-auto baseline-workrange boundary-auto boundary-workrange boundary-negative-origin; do
+            echo "::group::$c"
+            timeout 10s ./build/audit/core_arithmetic_audit "$c"
+            status=$?
+            echo "$c,$status" | tee -a audit-results.csv
+            echo "- `$c`: exit $status" >> "$GITHUB_STEP_SUMMARY"
+            echo "::endgroup::"
+          done
+          echo 'Diagnostic nonzero exits are intentionally preserved as evidence, not hidden.'
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arithmetic-audit-${{ matrix.compiler }}
+          path: audit-results.csv
