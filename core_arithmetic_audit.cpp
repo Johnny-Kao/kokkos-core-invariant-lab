@@ -38,6 +38,14 @@ int main(int argc, char** argv) {
       Policy::WorkRange part(policy, 0, 2);
       std::cout << "BOUNDARY_WORKRANGE " << part.begin() << " " << part.end() << "\n";
       if (part.begin() < 0 || part.end() < part.begin()) rc = 6;
+    } else if (mode == "small-workrange-high-origin") {
+      // One actual logical element: tests whether high absolute index alone overflows.
+      using SmallPolicy = Kokkos::RangePolicy<Kokkos::Serial, Kokkos::IndexType<std::int32_t>>;
+      const std::int32_t hi = std::numeric_limits<std::int32_t>::max();
+      SmallPolicy policy(hi - 1, hi, Kokkos::ChunkSize(1));
+      SmallPolicy::WorkRange part(policy, 1, 2);
+      std::cout << "SMALL_HIGH_ORIGIN " << part.begin() << " " << part.end() << "\\n";
+      if (part.begin() != hi || part.end() != hi) rc = 8;
     } else if (mode == "boundary-negative-origin") {
       Policy policy(Index(-1), maximum, Kokkos::ChunkSize(1));
       Policy::WorkRange part(policy, 0, 2);
