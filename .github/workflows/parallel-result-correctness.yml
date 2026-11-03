@@ -1,0 +1,85 @@
+name: Multithreaded Result Correctness
+on:
+  push:
+    paths:
+      - ".github/workflows/parallel-result-correctness.yml"
+      - "parallel_result_probe.cpp"
+  workflow_dispatch:
+
+jobs:
+  correctness:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [OPENMP, THREADS]
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: 1e08552799ab366f3037ce7ad46cc8d3ca85498d
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+      - name: Build pinned Kokkos
+        shell: bash
+        run: |
+          cmake -S kokkos -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=${{ matrix.backend == 'OPENMP' && 'ON' || 'OFF' }} \
+            -DKokkos_ENABLE_THREADS=${{ matrix.backend == 'THREADS' && 'ON' || 'OFF' }} \
+            -DKokkos_ENABLE_TESTS=OFF -DKokkos_ENABLE_EXAMPLES=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Compile plain and UBSan probes
+        shell: bash
+        run: |
+          mkdir -p parallel
+          cp parallel_result_probe.cpp parallel/
+          cat > parallel/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.25)
+          project(kokkos_parallel_correctness LANGUAGES CXX)
+          find_package(Kokkos REQUIRED CONFIG)
+          foreach(suffix IN ITEMS plain ubsan)
+            add_executable(parallel_${suffix} parallel_result_probe.cpp)
+            target_link_libraries(parallel_${suffix} PRIVATE Kokkos::kokkos)
+            target_compile_features(parallel_${suffix} PRIVATE cxx_std_20)
+            if(suffix STREQUAL "ubsan")
+              target_compile_options(parallel_${suffix} PRIVATE -O1 -g -fsanitize=signed-integer-overflow -fno-sanitize-recover=signed-integer-overflow)
+              target_link_options(parallel_${suffix} PRIVATE -fsanitize=signed-integer-overflow)
+            else()
+              target_compile_options(parallel_${suffix} PRIVATE -O2)
+            endif()
+          endforeach()
+          EOF
+          cmake -S parallel -B build/parallel -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/parallel --parallel 2
+      - name: Execute real parallel_for and parallel_reduce; preserve all outcomes
+        shell: bash
+        env:
+          OMP_NUM_THREADS: 4
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          set +e
+          printf 'compiler,backend,mode,build,exit_code\n' > parallel-result.csv
+          for build in plain ubsan; do
+            for mode in baseline-range boundary-range boundary-md-for boundary-md-reduce; do
+              echo "::group::${{ matrix.backend }} / ${{ matrix.compiler }} / $build / $mode"
+              timeout 20s ./build/parallel/parallel_$build "$mode"
+              rc=$?
+              echo "${{ matrix.compiler }},${{ matrix.backend }},$mode,$build,$rc" >> parallel-result.csv
+              echo "- $build / $mode: exit $rc" >> "$GITHUB_STEP_SUMMARY"
+              echo "::endgroup::"
+            done
+          done
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parallel-results-${{ matrix.backend }}-${{ matrix.compiler }}
+          path: parallel-result.csv
