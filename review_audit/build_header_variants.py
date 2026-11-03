@@ -65,3 +65,16 @@ ceil_new = """      this->m_tile_end[i] = static_cast<index_type>(
           length / this->m_tile[i] + (length % this->m_tile[i] != 0));"""
 complete = subst(reviewed, ceil_old, ceil_new, "ceil division without overflow")
 make_variant("complete_arithmetic", complete)
+
+# Separate runtime-only candidate: fix the HostIterateTile comparison BEFORE
+# addition. Do not attribute this to #9725 or to reviewers' constructor fix.
+host_path = root / "include/impl/KokkosExp_Host_IterateTile.hpp"
+host_original = host_path.read_text()
+host_fixed = subst(host_original,
+    "if ((offset[i] + m_tile[i]) <= m_upper[i]) {",
+    "if (m_tile[i] <= m_upper[i] - offset[i]) {",
+    "host iteration safe bound comparison")
+host_variant = dest / "complete_plus_host" / "include"
+shutil.copytree(dest / "complete_arithmetic" / "include", host_variant, dirs_exist_ok=True)
+(host_variant / "impl/KokkosExp_Host_IterateTile.hpp").write_text(host_fixed)
+print("complete_plus_host runtime comparison candidate written")
