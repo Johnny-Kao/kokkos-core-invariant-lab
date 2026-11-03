@@ -35,3 +35,15 @@ Note that the GitHub workflow conclusion is success by design: individual diagno
 - C-03 HostThreadTeam, C-04 SYCL Range, C-05 ScratchSpace, C-06 SYCL MDRange, C-07 CopyViews have **not** been dynamically tested in this run.
 - No change to upstream PR #9725 and no upstream issue created.
 - Next gate: production reachability, additional precondition checks, isolated A/B fixes, and backend-specific tests.
+
+## Additional result: ONE-ELEMENT high-origin WorkRange overflow
+
+Actions: https://github.com/Johnny-Kao/kokkos-core-invariant-lab/actions/runs/41617155944
+GCC and Clang both reproduced `Kokkos_ExecPolicy.hpp:339` signed integer overflow.
+
+Public bounds with **one** logical element: `RangePolicy<Serial, IndexType<int32_t>>(INT32_MAX-1, INT32_MAX, ChunkSize(1))`.
+Construct the publicly accessible `Policy::WorkRange(policy, 1, 2)`. Expected partition after the end is empty `[INT32_MAX, INT32_MAX)`. The implementation computes `m_begin + work_part` before clamping the resulting `m_end` to the policy upper bound; this evaluates `INT32_MAX + 1`, triggering UBSan (both compilers, exit 1).
+
+**Production reachability:** `WorkRange` is called by real Threads parallel_for / parallel_reduce and by selected CUDA/HIP/HPX backend paths, but this particular one-element probe instantiated the nested WorkRange directly using a Serial policy. Thus the arithmetic bug is confirmed, while live Threads/CUDA/HIP execution with one element has **not** yet been dynamically demonstrated. Do not conflate direct WorkRange invocation with confirmed backend scheduling corruption.
+
+Interpretation: large iteration count is not a necessary condition for this intermediate overflow; a small logical range with a high absolute origin can trigger it. No incorrect actual functor invocation has been demonstrated by this specific experiment.
