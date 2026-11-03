@@ -68,7 +68,7 @@ jobs:
           set +e
           printf 'compiler,backend,mode,build,exit_code\n' > parallel-result.csv
           for build in plain ubsan; do
-            for mode in baseline-range boundary-range boundary-md-for boundary-md-reduce; do
+            for mode in baseline-range baseline-range-reduce boundary-range boundary-range-reduce boundary-md-for boundary-md-reduce; do
               echo "::group::${{ matrix.backend }} / ${{ matrix.compiler }} / $build / $mode"
               timeout 20s ./build/parallel/parallel_$build "$mode"
               rc=$?
