@@ -1,4 +1,4 @@
-name: Review Suggestion A-B Validation
+name: Review 9725 Consolidated Candidate Validation
 on:
   push:
     paths:
@@ -43,14 +43,14 @@ jobs:
           cmake --install build/kokkos
       - name: Generate isolated header variants using exact reviewer edits
         run: python3 review_audit/build_header_variants.py install review_audit/variants
-      - name: Compile all 3 variants with optimized and UBSan probe
+      - name: Compile consolidated candidate with optimized and UBSan probes
         shell: bash
         run: |
           cat > review_audit/CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.25)
           project(review_suggestion_AB LANGUAGES CXX)
           find_package(Kokkos CONFIG REQUIRED)
-          foreach(variant IN ITEMS original pr_only reviewed complete_arithmetic complete_plus_host)
+          foreach(variant IN ITEMS final_9725)
             foreach(sanitizer IN ITEMS plain ubsan)
               set(target probe_${variant}_${sanitizer})
               add_executable(${target} reviewer_policy_probe.cpp)
@@ -68,29 +68,40 @@ jobs:
           EOF
           cmake -S review_audit -B build/audit -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
           cmake --build build/audit --parallel 2
-      - name: Execute variant matrix, record diagnostic and abort exits
+      - name: Assert candidate behavior (fail on unexpected regression)
         shell: bash
         env:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           OMP_PROC_BIND: "false"
         run: |
-          set +e
-          printf 'compiler,backend,variant,mode,case,exit_code\n' > reviewer-ab.csv
-          for variant in original pr_only reviewed complete_arithmetic complete_plus_host; do
-            for mode in plain ubsan; do
-              for case in normal pr-explicit review-noexplicit actual-product-overlimit tile-too-wide-for-int division-boundary-contract actual-md-parallel-reduce-tile1 actual-md-parallel-reduce-tile4 construct-bench; do
-                echo "::group::${{ matrix.backend }}/${{ matrix.compiler }} $variant $mode $case"
-                timeout 6s ./build/audit/probe_${variant}_${mode} "$case"
-                rc=$?
-                echo "${{ matrix.compiler }},${{ matrix.backend }},$variant,$mode,$case,$rc" | tee -a reviewer-ab.csv
-                echo "::endgroup::"
-              done
+          set -euo pipefail
+          for mode in plain ubsan; do
+            binary="./build/audit/probe_final_9725_${mode}"
+            for case in normal pr-explicit review-noexplicit division-boundary-contract actual-md-parallel-reduce-tile1 construct-bench; do
+              echo "::group::PASS expected ${mode} ${case}"
+              timeout 20s "$binary" "$case"
+              echo "::endgroup::"
+            done
+            for case in actual-product-overlimit tile-too-wide-for-int; do
+              echo "::group::rejection expected ${mode} ${case}"
+              set +e
+              (ulimit -c 0; timeout 20s "$binary" "$case") > rejected.log 2>&1
+              rc=$?
+              set -e
+              cat rejected.log
+              if [ "$rc" -eq 0 ] || [ "$rc" -eq 124 ]; then
+                echo "::error::Expected immediate rejection, got exit $rc"
+                exit 1
+              fi
+              if ! grep -q "tile dimensions exceed int limit" rejected.log; then
+                echo "::error::Expected overflow guard message was absent"
+                exit 1
+              fi
+              if grep -qi "runtime error: signed integer overflow" rejected.log; then
+                echo "::error::UBSan overflow before guard"
+                exit 1
+              fi
+              echo "::endgroup::"
             done
           done
-          cat reviewer-ab.csv >> "$GITHUB_STEP_SUMMARY"
-          exit 0
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: reviewer-ab-${{ matrix.backend }}-${{ matrix.compiler }}
-          path: reviewer-ab.csv
+          echo "Consolidated #9725 candidate: expected normal results and defensive rejections verified." >> "$GITHUB_STEP_SUMMARY"
