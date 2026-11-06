@@ -65,6 +65,9 @@ ceil_new = """      this->m_tile_end[i] = static_cast<index_type>(
           length / this->m_tile[i] + (length % this->m_tile[i] != 0));"""
 complete = subst(reviewed, ceil_old, ceil_new, "ceil division without overflow")
 make_variant("complete_arithmetic", complete)
+# Consolidated #9725 candidate: 11/3 agreed fixes + 11/5 else-while guard.
+# Deliberately excludes independent HostIterateTile and wider-type redesign.
+make_variant("final_9725", complete)
 
 # Separate runtime-only candidate: fix the HostIterateTile comparison BEFORE
 # addition. Do not attribute this to #9725 or to reviewers' constructor fix.
