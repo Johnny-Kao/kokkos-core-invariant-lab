@@ -73,6 +73,34 @@ int main(int argc, char** argv) {
     std::printf("K03_BIN_RESULT: index=%d, max_bins=%d\n", index,
                 op.max_bins());
     if (index < 0 || index >= op.max_bins()) result = 20;
+  } else if (!std::strcmp(mode, "--fallback-control") ||
+             !std::strcmp(mode, "--fallback-high")) {
+    const bool high = !std::strcmp(mode, "--fallback-high");
+    // Exactly the native BinSort implementation dispatched by the public
+    // sort() fallback on backends with no specialized sorting library.
+    // Serial is used only to execute that same implementation in Research.
+    Keys v("k03-fallback-keys", 2);
+    auto host = Kokkos::create_mirror_view(v);
+    const Key small = 6;
+    const Key start = high ? base : small;
+    host(0) = start + 1;
+    host(1) = start;
+    Kokkos::deep_copy(v, host);
+    Kokkos::Impl::sort_via_binsort(Exec{}, v);
+    auto after = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, v);
+    if (after(0) == start && after(1) == start + 1) {
+      std::puts(high ? "K03_FALLBACK_HIGH_SORTED"
+                     : "K03_FALLBACK_CONTROL_SORTED");
+    } else if (high && after(0) == start + 1 && after(1) == start) {
+      std::puts("K03_FALLBACK_SILENT_WRONG_ORDER: normal int64 input left unsorted");
+    } else {
+      std::printf("K03_UNEXPECTED_FALLBACK_OUTPUT: [%lld, %lld] expected [%lld, %lld]\\n",
+                  static_cast<long long>(after(0)),
+                  static_cast<long long>(after(1)),
+                  static_cast<long long>(start),
+                  static_cast<long long>(start + 1));
+      result = 32;
+    }
   } else if (!std::strcmp(mode, "--subrange")) {
     Keys keys = make_keys(base + 1, base);
     Kokkos::sort(Exec{}, keys, std::size_t{1}, std::size_t{3});
