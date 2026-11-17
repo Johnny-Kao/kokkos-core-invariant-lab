@@ -1,0 +1,80 @@
+name: K02 Scratch Alignment Capacity (Research)
+
+on:
+  push:
+    branches:
+      - "research/k02-scratch-alignment-20261117"
+    paths:
+      - "scratch_k02/**"
+      - ".github/workflows/k02-scratch-alignment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k02-scratch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    name: "${{ matrix.compiler }} / pinned upstream"
+    steps:
+      - name: Checkout research test
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned upstream Kokkos
+        uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: e9e05d0ec9fd9ed215d761c34bc0dc42ee4248c1
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Configure Kokkos Serial
+        run: |
+          cmake -S kokkos -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=OFF \
+            -DKokkos_ENABLE_TESTS=OFF \
+            -DKokkos_ENABLE_EXAMPLES=OFF
+
+      - name: Build and install unmodified Kokkos
+        run: |
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+
+      - name: Build native K02 probe
+        run: |
+          cmake -S scratch_k02 -B build/k02 \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/k02 --parallel 2
+
+      - name: Verify positive and negative controls
+        run: ./build/k02/k02_scratch_probe
+
+      - name: Require exact RED signature from unmodified upstream
+        run: |
+          set +e
+          ./build/k02/k02_scratch_probe --boundary > boundary.log 2>&1
+          status=$?
+          set -e
+          cat boundary.log
+          if [ "$status" -ne 42 ]; then
+            echo "Expected diagnostic exit 42, received $status" >&2
+            exit 1
+          fi
+          grep -F "K02_OBSERVED_OUT_OF_CAPACITY" boundary.log
+          echo "Confirmed: the exhausted scratch allocator returned a pointer beyond its declared capacity." >> "$GITHUB_STEP_SUMMARY"
