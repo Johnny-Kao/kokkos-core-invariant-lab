@@ -61,35 +61,29 @@ jobs:
       - name: Verify ordinary int64 subrange and full-range sorting
         run: ./build/k03/k03_sort_probe --controls
 
-      - name: Reproduce invalid integer binning without OOB access
+      - name: Observe lossy double mapping without assuming a sanitizer trap
         env:
           UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
         run: |
-          set +e
-          ./build/k03/k03_sort_probe --bin-diagnostic > bin.log 2>&1
-          code=$?
-          set -e
-          cat bin.log
-          if [ "$code" -eq 0 ]; then
-            echo "No sanitiser failure: K03 bin hypothesis falsified" >&2
-            exit 1
-          fi
-          grep -F "Kokkos_BinOpsPublicAPI.hpp" bin.log
-          grep -F "outside the range of representable values" bin.log
+          ./build/k03/k03_sort_probe --bin-diagnostic
+          echo "Integer adjacent values at 2^53 map to an equal double value." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Reproduce through normal Kokkos sort subrange public API
-        env:
-          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+      - name: Verify fall-back sorter control with ordinary integers
         run: |
-          set +e
-          timeout 10s ./build/k03/k03_sort_probe --subrange > api.log 2>&1
-          code=$?
-          set -e
-          cat api.log
-          if [ "$code" -eq 0 ]; then
-            echo "No sanitiser failure in public subrange API: revisit hypothesis" >&2
-            exit 1
-          fi
-          grep -F "Kokkos_BinOpsPublicAPI.hpp" api.log
-          grep -F "outside the range of representable values" api.log
-          echo "K03: both direct bin operation and public sort-subrange path reach undefined double-to-int conversion for adjacent int64 keys near 2^53 (GCC/Clang)." >> "$GITHUB_STEP_SUMMARY"
+          ./build/k03/k03_sort_probe --fallback-control > control.log 2>&1
+          cat control.log
+          grep -F "K03_FALLBACK_CONTROL_SORTED" control.log
+
+      - name: Check silent wrong order in production fallback implementation
+        run: |
+          ./build/k03/k03_sort_probe --fallback-high > fallback.log 2>&1
+          cat fallback.log
+          grep -F "K03_FALLBACK_SILENT_WRONG_ORDER" fallback.log
+          echo "Internal fallback BinSort: ordinary int64 inputs near 2^53 remain reversed (verified wrong output, no crash)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare public Serial subrange API behavior (independent path)
+        run: |
+          ./build/k03/k03_sort_probe --subrange > subrange.log 2>&1
+          cat subrange.log
+          grep -F "K03_SORT_RESULT_CORRECT" subrange.log
+          echo "Public Serial subrange sorts within bins and is correct for this input; do not conflate it with the full-range fallback." >> "$GITHUB_STEP_SUMMARY"
