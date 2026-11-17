@@ -59,11 +59,6 @@ jobs:
 
       - name: Build and run unmodified real TeamPolicy RED
         run: |
-          cmake -S scratch_k02 -B build/k02 \
-            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
-          cmake --build build/k02 --parallel 2
           cmake -S scratch_k02 -B build/k02-team \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
             -DCMAKE_BUILD_TYPE=Debug \
