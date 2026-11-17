@@ -87,3 +87,26 @@ jobs:
           cat subrange.log
           grep -F "K03_SORT_RESULT_CORRECT" subrange.log
           echo "Public Serial subrange sorts within bins and is correct for this input; do not conflate it with the full-range fallback." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply focused candidate only in Actions source checkout
+        run: |
+          git -C kokkos apply --check ../sort_k03/candidate/int64-binsort-safe-fallback.patch
+          git -C kokkos apply ../sort_k03/candidate/int64-binsort-safe-fallback.patch
+          git -C kokkos diff --check
+          git -C kokkos diff -- algorithms/src/sorting/impl/Kokkos_SortImpl.hpp
+
+      - name: Rebuild patched native sorter and verify GREEN
+        run: |
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+          cmake --build build/k03 --clean-first --parallel 2
+
+          ./build/k03/k03_sort_probe --controls
+          ./build/k03/k03_sort_probe --fallback-control
+
+          ./build/k03/k03_sort_probe --fallback-high > patched.log 2>&1
+          cat patched.log
+          grep -F "K03_FALLBACK_HIGH_SORTED" patched.log
+
+          ./build/k03/k03_sort_probe --subrange
+          echo "K03 patched GREEN: exact 64-bit keys are sorted in the formerly colliding bin; regular controls unchanged." >> "$GITHUB_STEP_SUMMARY"
