@@ -1,0 +1,87 @@
+name: K02 TeamPolicy View Production Path (Research)
+
+on:
+  push:
+    branches:
+      - "research/k02-scratch-alignment-20261117"
+    paths:
+      - ".github/workflows/k02-team-view-real-path.yml"
+      - "scratch_k02/team_policy_probe.cpp"
+      - "scratch_k02/candidate/alignment-capacity-guard.patch"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k02-real-path-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-team-view-path:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: g++
+            backend: SERIAL
+          - compiler: clang++
+            backend: SERIAL
+          - compiler: g++
+            backend: OPENMP
+    name: "${{ matrix.compiler }} / ${{ matrix.backend }}"
+    steps:
+      - name: Checkout research files
+        uses: actions/checkout@v4
+      - name: Checkout fixed upstream source
+        uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: e9e05d0ec9fd9ed215d761c34bc0dc42ee4248c1
+          path: kokkos
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Configure and build unmodified Kokkos
+        run: |
+          cmake -S kokkos -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=${{ matrix.backend == 'OPENMP' && 'ON' || 'OFF' }} \
+            -DKokkos_ENABLE_TESTS=OFF \
+            -DKokkos_ENABLE_EXAMPLES=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+
+      - name: Build and run unmodified real TeamPolicy RED
+        run: |
+          cmake -S scratch_k02 -B build/k02 \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/k02 --parallel 2
+          cmake -S scratch_k02 -B build/k02-team \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/k02-team --parallel 2
+          ./build/k02-team/k02_team_policy_probe --expect-red
+
+      - name: Apply minimal candidate guard in Actions checkout only
+        run: |
+          git -C kokkos apply --check ../scratch_k02/candidate/alignment-capacity-guard.patch
+          git -C kokkos apply ../scratch_k02/candidate/alignment-capacity-guard.patch
+          git -C kokkos diff --check
+          git -C kokkos diff -- core/src/Kokkos_ScratchSpace.hpp
+
+      - name: Build and run candidate GREEN
+        run: |
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+          cmake --build build/k02-team --clean-first --parallel 2
+          ./build/k02-team/k02_team_policy_probe --expect-green
+          echo "K02 TeamPolicy public API: baseline RED and candidate GREEN on ${{ matrix.compiler }} / ${{ matrix.backend }}" >> "$GITHUB_STEP_SUMMARY"
