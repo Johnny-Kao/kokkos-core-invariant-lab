@@ -32,6 +32,9 @@ jobs:
           - compiler: g++
             backend: OPENMP
     name: "${{ matrix.compiler }} / ${{ matrix.backend }}"
+    env:
+      OMP_NUM_THREADS: "2"
+      OMP_PROC_BIND: "false"
     steps:
       - name: Checkout research files
         uses: actions/checkout@v4
