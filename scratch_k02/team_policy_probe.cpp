@@ -95,10 +95,13 @@ int main(int argc, char** argv) {
   }
   const bool expect_red = std::strcmp(argv[1], "--expect-red") == 0;
   Kokkos::initialize();
-  const auto normal = run_case(2 * IntScratchView::shmem_size(1), 0);
+  // Host scratch pools retain the high-water capacity across kernels.
+  // Run smallest allocations first so no larger earlier kernel masks a
+  // genuine out-of-capacity condition in the later checks.
   const auto small = run_case(16, 1);
   const auto aligned16 = run_case(16, 2);
   const auto aligned32 = run_case(32, 2);
+  const auto normal = run_case(2 * IntScratchView::shmem_size(1), 0);
   Kokkos::finalize();
 
   std::printf("proper_view_budget: first=%d second=%d sum=%d\n",
