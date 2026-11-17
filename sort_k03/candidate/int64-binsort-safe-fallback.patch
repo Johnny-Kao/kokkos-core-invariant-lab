@@ -1,0 +1,28 @@
+diff --git a/algorithms/src/sorting/impl/Kokkos_SortImpl.hpp b/algorithms/src/sorting/impl/Kokkos_SortImpl.hpp
+--- a/algorithms/src/sorting/impl/Kokkos_SortImpl.hpp
++++ b/algorithms/src/sorting/impl/Kokkos_SortImpl.hpp
+@@ -19,4 +19,5 @@
+ #include <cmath>
+ #include <cstdint>
++#include <limits>
+ #include <type_traits>
+ #include <utility>
+@@ -164,3 +164,17 @@
+       max_bins     = max_val - min_val + 1;
+-      sort_in_bins = false;
++      using value_type = typename ViewType::non_const_value_type;
++      // Double binning is exact only when every possible key is representable.
++      // Otherwise values may collide in one bin and still need comparison.
++      if constexpr (std::numeric_limits<value_type>::digits <=
++                    std::numeric_limits<double>::digits) {
++        sort_in_bins = false;
++      } else {
++        constexpr value_type max_exact = static_cast<value_type>(
++            uint64_t{1} << std::numeric_limits<double>::digits);
++        bool exact_keys = result.max_val <= max_exact;
++        if constexpr (std::is_signed_v<value_type>) {
++          exact_keys = exact_keys && result.min_val >= -max_exact;
++        }
++        sort_in_bins = !exact_keys;
++      }
++    }
