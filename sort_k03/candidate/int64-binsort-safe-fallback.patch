@@ -25,4 +25,4 @@ diff --git a/algorithms/src/sorting/impl/Kokkos_SortImpl.hpp b/algorithms/src/so
 +        }
 +        sort_in_bins = !exact_keys;
 +      }
-+    }
+     }
