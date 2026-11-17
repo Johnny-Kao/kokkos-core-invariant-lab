@@ -1,0 +1,95 @@
+name: K03 64-bit Subrange Sort Correctness (Research)
+
+on:
+  push:
+    branches: ["research/k03-int64-sort-precision-20261118"]
+    paths:
+      - "sort_k03/**"
+      - ".github/workflows/k03-int64-sort-correctness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k03-sort-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-sort-reproducer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    name: "${{ matrix.compiler }} / Serial public API"
+    steps:
+      - name: Checkout independent Research probe
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned unmodified upstream
+        uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: e9e05d0ec9fd9ed215d761c34bc0dc42ee4248c1
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Configure Kokkos Serial backend
+        run: |
+          cmake -S kokkos -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=OFF \
+            -DKokkos_ENABLE_TESTS=OFF \
+            -DKokkos_ENABLE_EXAMPLES=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+
+      - name: Build sanitised public sort probe
+        run: |
+          cmake -S sort_k03 -B build/k03 \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/k03 --parallel 2
+
+      - name: Verify ordinary int64 subrange and full-range sorting
+        run: ./build/k03/k03_sort_probe --controls
+
+      - name: Reproduce invalid integer binning without OOB access
+        env:
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: |
+          set +e
+          ./build/k03/k03_sort_probe --bin-diagnostic > bin.log 2>&1
+          code=$?
+          set -e
+          cat bin.log
+          if [ "$code" -eq 0 ]; then
+            echo "No sanitiser failure: K03 bin hypothesis falsified" >&2
+            exit 1
+          fi
+          grep -F "Kokkos_BinOpsPublicAPI.hpp" bin.log
+          grep -F "outside the range of representable values" bin.log
+
+      - name: Reproduce through normal Kokkos sort subrange public API
+        env:
+          UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+        run: |
+          set +e
+          timeout 10s ./build/k03/k03_sort_probe --subrange > api.log 2>&1
+          code=$?
+          set -e
+          cat api.log
+          if [ "$code" -eq 0 ]; then
+            echo "No sanitiser failure in public subrange API: revisit hypothesis" >&2
+            exit 1
+          fi
+          grep -F "Kokkos_BinOpsPublicAPI.hpp" api.log
+          grep -F "outside the range of representable values" api.log
+          echo "K03: both direct bin operation and public sort-subrange path reach undefined double-to-int conversion for adjacent int64 keys near 2^53 (GCC/Clang)." >> "$GITHUB_STEP_SUMMARY"
