@@ -1,0 +1,89 @@
+name: "K09 Research Green - isolated BinSort memory-safety fixes"
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: k09-fixed-green-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  corrected-public-api:
+    name: "K09-${{ matrix.candidate }} / native OpenMP / ASan"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate: [A, B]
+    env:
+      OMP_NUM_THREADS: "4"
+      OMP_DYNAMIC: "FALSE"
+      ASAN_OPTIONS: "halt_on_error=1:detect_leaks=0:abort_on_error=1:print_stacktrace=1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: e9e05d0ec9fd9ed215d761c34bc0dc42ee4248c1
+          path: kokkos-source
+          persist-credentials: false
+      - name: Apply ONLY selected minimal research hypothesis to temporary CI checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.candidate }}" == "A" ]]; then
+            patch=research/k09/patches/0001-correct-destination-range.patch
+          else
+            patch=research/k09/patches/0002-reset-counters-before-reuse.patch
+          fi
+          git -C kokkos-source apply --check "../$patch"
+          git -C kokkos-source apply "../$patch"
+          git -C kokkos-source diff --check
+          git -C kokkos-source diff -- algorithms/src/sorting/Kokkos_BinSortPublicAPI.hpp
+      - name: Build patched pinned Kokkos with OpenMP
+        shell: bash
+        run: |
+          cmake -S kokkos-source -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_OPENMP=ON -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_TESTS=OFF -DKokkos_ENABLE_EXAMPLES=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Build actual public-API test harness with ASan
+        shell: bash
+        run: |
+          cmake -S research/k09 -B build/k09 -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/k09 --parallel 2
+      - name: K09-A single minimal fix should preserve both aligned and non-aligned normal destinations
+        if: matrix.candidate == 'A'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 15s ./build/k09/k09_binsort_offset aligned 2>&1 | tee k09-fixed-a-aligned.log
+          grep -q K09_ALIGNED_PASS k09-fixed-a-aligned.log
+          timeout 15s ./build/k09/k09_binsort_offset fixed 2>&1 | tee k09-fixed-a-nonaligned.log
+          grep -q K09_FIXED_RANGE_PASS k09-fixed-a-nonaligned.log
+          timeout 15s ./build/k09/k09_binsort_offset oob 2>&1 | tee k09-fixed-a-bounded.log
+          grep -q K09_OOB_MODE_SAFE_AND_CORRECT k09-fixed-a-bounded.log
+          echo "K09-A native GREEN (aligned, independent ranges, bounded-size)" >> "$GITHUB_STEP_SUMMARY"
+      - name: K09-B single minimal fix should allow repeated normal permutation generation
+        if: matrix.candidate == 'B'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 15s ./build/k09/k09_binsort_reuse control 2>&1 | tee k09-fixed-b-fresh.log
+          grep -q K09_FRESH_ROUND_PASS=1 k09-fixed-b-fresh.log
+          timeout 15s ./build/k09/k09_binsort_reuse reuse 2>&1 | tee k09-fixed-b-reuse.log
+          grep -q K09_REUSE_ROUND_PASS=0 k09-fixed-b-reuse.log
+          grep -q K09_REUSE_ROUND_PASS=1 k09-fixed-b-reuse.log
+          echo "K09-B native GREEN (fresh control and repeated reuse)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Save explicit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "K09-${{ matrix.candidate }}-green-evidence"
+          path: k09-fixed-*.log
+          if-no-files-found: warn
