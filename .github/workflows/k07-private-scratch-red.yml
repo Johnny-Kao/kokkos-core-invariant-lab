@@ -1,0 +1,43 @@
+name: "PRIVATE Research K07 — Scratch alignment silent overwrite"
+
+on:
+  push:
+    branches: [research/k07-scratch-alignment-overrun-20261119]
+    paths:
+      - research/k07/**
+      - .github/workflows/k07-private-scratch-red.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  k07-native-scratch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1"
+      UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: 5.3.0
+          path: upstream-kokkos
+          persist-credentials: false
+      - name: Build unmodified Kokkos 5.3.0 Serial
+        run: |
+          cmake -S upstream-kokkos -B build/kokkos \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON -DKokkos_ENABLE_TESTS=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Build original library API test with ASan and UBSan
+        run: |
+          cmake -S research/k07 -B build/k07 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/k07 --parallel 2
+      - name: Run private positive/negative scratch tests
+        run: ./build/k07/k07_scratch_alignment
