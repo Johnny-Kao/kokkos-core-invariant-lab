@@ -1,0 +1,76 @@
+name: K05 Overlapping Backward Copy (Research)
+
+on:
+  push:
+    branches: ["research/k05-backward-overlap-20261119"]
+    paths:
+      - ".github/workflows/k05-backward-overlap.yml"
+      - "backward_k05/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k05-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-public-api:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: g++
+            backend: SERIAL
+            threads: 1
+            expectation: clean
+          - compiler: clang++
+            backend: SERIAL
+            threads: 1
+            expectation: clean
+          - compiler: g++
+            backend: OPENMP
+            threads: 4
+            expectation: red
+          - compiler: g++
+            backend: OPENMP
+            threads: 8
+            expectation: red
+    name: "${{ matrix.compiler }} / ${{ matrix.backend }} / ${{ matrix.threads }} threads"
+    env:
+      OMP_NUM_THREADS: "${{ matrix.threads }}"
+      OMP_PROC_BIND: "false"
+    steps:
+      - name: Checkout independent Research
+        uses: actions/checkout@v4
+      - name: Checkout released upstream Kokkos
+        uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: 5.3.0
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+      - name: Build native unmodified Kokkos 5.3.0
+        run: |
+          cmake -S kokkos -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=${{ matrix.backend == 'OPENMP' && 'ON' || 'OFF' }} \
+            -DKokkos_ENABLE_TESTS=OFF -DKokkos_ENABLE_EXAMPLES=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Compile public API overlap and standard reference
+        run: |
+          cmake -S backward_k05 -B build/k05 \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/k05 --parallel 2
+      - name: Check allowed overlapping right shift vs standard
+        run: ./build/k05/k05_backward_probe --expect-${{ matrix.expectation }}
