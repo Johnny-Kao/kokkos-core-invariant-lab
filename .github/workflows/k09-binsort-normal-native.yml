@@ -1,4 +1,4 @@
-name: "K09 private normal BinSort reuse - native ASan"
+name: "K09 native BinSort range and reuse - public Research ASan"
 on:
   workflow_dispatch:
 permissions:
@@ -54,10 +54,13 @@ jobs:
           if [[ "$rc" -eq 0 ]]; then echo "K09_OFFSET_OOB_NOT_REPRODUCED"; exit 1; fi
           if ! grep -q 'heap-buffer-overflow' k09-offset-oob.log; then echo "K09_OFFSET_OOB_UNCLASSIFIED"; exit 1; fi
           echo "K09_OFFSET_NATIVE_ASAN_RED"
-      - name: Control - rebuild sorter for changed keys
+      - name: K09-B control - fresh sorter supports duplicate keys without stable ordering
         run: |
+          set -o pipefail
           timeout 15s ./build/k09/k09_binsort_reuse control 2>&1 | tee k09-control.log
-      - name: RED candidate - reuse sorter with changed keys
+          grep -q 'K09_FRESH_ROUND_PASS=0' k09-control.log
+          grep -q 'K09_FRESH_ROUND_PASS=1' k09-control.log
+      - name: K09-B RED candidate - reuse sorter with changed keys
         run: |
           set +e
           timeout 15s ./build/k09/k09_binsort_reuse reuse > k09-reuse.log 2>&1
@@ -70,10 +73,11 @@ jobs:
             echo "K09_RED_NOT_REPRODUCED"
             exit 1
           fi
-          if ! grep -Eq 'heap-buffer-overflow|array bounds error|K09_PERM_MISMATCH' k09-reuse.log; then
+          if ! grep -Eq 'heap-buffer-overflow|array bounds error|K09_INVALID_PERM' k09-reuse.log; then
             echo "K09_FAILURE_UNCLASSIFIED"
             exit 1
           fi
+          grep -q 'K09_REUSE_ROUND_PASS=0' k09-reuse.log || { echo 'K09_FIRST_PASS_MISSING'; exit 1; }
           echo "K09_RED_REPRODUCED"
       - name: Preserve evidence
         if: always()
