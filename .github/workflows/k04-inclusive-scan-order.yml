@@ -81,4 +81,4 @@ jobs:
           cmake --install build/kokkos
           cmake --build build/k04 --clean-first --parallel 2
           ./build/k04/k04_scan_probe --expect-green
-          echo "K04 public View and TeamPolicy transform_inclusive_scan with init: baseline RED / candidate GREEN; associative noncommutative matrix multiplication, standard C++ reference." >> "$GITHUB_STEP_SUMMARY"
+          echo "K04 public View transform_inclusive_scan + inclusive_scan with init: baseline RED / candidate GREEN; associative noncommutative matrix multiplication, standard C++ reference." >> "$GITHUB_STEP_SUMMARY"
