@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
     return 2;
   }
   const bool red = std::strcmp(argv[1], "--expect-red") == 0;
-  Kokkos::initialize();
+  Kokkos::ScopeGuard kokkos_scope(argc, argv);
 
   std::array<Matrix, 3> input_data{
       Matrix{1, 1, 0, 1}, Matrix{1, 0, 1, 1}, Matrix{2, 0, 0, 1}};
@@ -99,9 +99,9 @@ int main(int argc, char** argv) {
   print_matrix("oracle_first", oracle[0]);
   print_matrix("transform_first", exec_host(0));
   print_matrix("inclusive_first", inclusive_host(0));
-  std::printf("K04_RESULTS control=%d transform_correct=%d inclusive_correct=%d\\n",
+  std::printf("K04_RESULTS control=%d transform_correct=%d inclusive_correct=%d\n",
               int(control_ok), int(transform_correct), int(inclusive_correct));
-  Kokkos::finalize();
+
 
   if (!control_ok) {
     std::puts("K04_CONTROL_FAILURE: without-init API differs from standard");
