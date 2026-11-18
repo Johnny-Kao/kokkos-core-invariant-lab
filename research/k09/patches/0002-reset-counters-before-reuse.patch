@@ -1,0 +1,15 @@
+diff --git a/algorithms/src/sorting/Kokkos_BinSortPublicAPI.hpp b/algorithms/src/sorting/Kokkos_BinSortPublicAPI.hpp
+--- a/algorithms/src/sorting/Kokkos_BinSortPublicAPI.hpp
++++ b/algorithms/src/sorting/Kokkos_BinSortPublicAPI.hpp
+@@ -201,9 +201,10 @@
+                                    typename Space::memory_space>::accessible,
+         "The provided execution space must be able to access the memory space "
+         "BinSort was initialized with!");
+ 
+-    const size_t len = range_end - range_begin;
++    Kokkos::deep_copy(exec, bin_count_atomic, 0);
++    const size_t len = range_end - range_begin;
+     Kokkos::parallel_for(
+         "Kokkos::Sort::BinCount",
+         Kokkos::RangePolicy<ExecutionSpace, bin_count_tag,
+                             Kokkos::IndexType<int64_t>>(exec, 0, len),
