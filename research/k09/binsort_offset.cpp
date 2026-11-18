@@ -1,4 +1,4 @@
-// PRIVATE K09 independent source-first regression probe.
+// K09 independent source-first regression probe.
 // All keys are within [0,3]; both key and value ranges have four elements.
 // Public BinSort API accepts different key and value offsets, but its final
 // write-back appears to use key range_begin instead of values_range_begin.
@@ -17,12 +17,14 @@ int main(int argc, char** argv) {
   if (argc != 2 ||
       (std::strcmp(argv[1],"aligned") != 0 &&
        std::strcmp(argv[1],"silent") != 0 &&
-       std::strcmp(argv[1],"oob") != 0)) {
-    std::fprintf(stderr,"usage: k09_binsort_offset aligned|silent|oob\n");
+       std::strcmp(argv[1],"oob") != 0 &&
+       std::strcmp(argv[1],"fixed") != 0)) {
+    std::fprintf(stderr,"usage: k09_binsort_offset aligned|silent|oob|fixed\n");
     return 2;
   }
   bool aligned = std::strcmp(argv[1],"aligned") == 0;
   bool oob = std::strcmp(argv[1],"oob") == 0;
+  bool expect_fixed = std::strcmp(argv[1],"fixed") == 0;
   Kokkos::initialize();
   {
     Vec keys("keys_with_normal_nonzero_range", 8);
@@ -57,7 +59,18 @@ int main(int argc, char** argv) {
     std::fflush(stdout);
     sorter.sort(Exec{},vals,aligned?4:0,aligned?8:4);
     Exec{}.fence();
-    if (!oob) {
+    if (oob) {
+      auto got=Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, vals);
+      const int expected[4]={0,10,20,30};
+      for (int i=0;i<4;++i) {
+        if(got(i)!=expected[i]) {
+          std::fprintf(stderr, "K09_OOB_MODE_WRONG_DATA i=%d got=%d expected=%d\n",
+                      i,got(i),expected[i]);
+          return 7;
+        }
+      }
+      std::puts("K09_OOB_MODE_SAFE_AND_CORRECT");
+    } else {
       auto got=Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, vals);
       int dest=aligned?4:0;
       const int expected[4]={0,10,20,30};
@@ -75,11 +88,16 @@ int main(int argc, char** argv) {
       if(aligned) {
         if(!expected_range_correct) return 4;
         std::puts("K09_ALIGNED_PASS");
+      } else if(expect_fixed) {
+        if(!expected_range_correct || !unrelated_range_preserved) {
+          std::puts("K09_FIXED_RANGE_STILL_WRONG"); return 6;
+        }
+        std::puts("K09_FIXED_RANGE_PASS");
       } else {
         if(expected_range_correct && unrelated_range_preserved) {
           std::puts("K09_SILENT_NOT_REPRODUCED"); return 5;
         }
-        std::puts("K09_SILENT_WRONG_RANGE_OBSERVED"); // Process returned normally without ASan.
+        std::puts("K09_SILENT_WRONG_RANGE_OBSERVED"); // Normal process exit.
       }
     }
   }
