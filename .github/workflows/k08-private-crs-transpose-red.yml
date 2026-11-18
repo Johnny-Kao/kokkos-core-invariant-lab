@@ -1,0 +1,60 @@
+name: "PRIVATE Research K08 — CRS rectangular transpose bounds"
+on:
+  push:
+    branches: [research/k08-crs-transpose-dimension-20261119]
+    paths:
+      - research/k08/**
+      - .github/workflows/k08-private-crs-transpose-red.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  k08-crs-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1"
+      UBSAN_OPTIONS: "print_stacktrace=1:halt_on_error=1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: 5.3.0
+          path: upstream-kokkos
+          persist-credentials: false
+      - name: Build original Kokkos 5.3.0 Serial
+        run: |
+          cmake -S upstream-kokkos -B build/kokkos \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=g++ \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON -DKokkos_ENABLE_TESTS=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+      - name: Build actual public CRS transpose repro
+        run: |
+          cmake -S research/k08 -B build/k08 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/k08 --parallel 2
+      - name: Square control should complete
+        run: ./build/k08/k08_crs_transpose_native square
+      - name: Rectangular probe with expected conditional OOB
+        shell: bash
+        run: |
+          set +e
+          ./build/k08/k08_crs_transpose_native rectangular > k08-rectangular.log 2>&1
+          rc=$?
+          set -e
+          head -n 70 k08-rectangular.log
+          echo "Rectangular process exit: $rc" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -eq 0 ]; then
+            echo 'Rectangular transpose completed with no sanitizer diagnostic' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Rectangular transpose failed — inspect source trace and contract' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k08-crs-native-asan
+          path: k08-rectangular.log
+          if-no-files-found: ignore
