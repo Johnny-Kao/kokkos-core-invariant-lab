@@ -1,4 +1,4 @@
-// PRIVATE K09 research: standard-sized public API for reusing BinSort.
+// K09 research: standard-sized public API for reusing BinSort.
 // No invalid bin keys or undersized buffers; only 8 keys, two normal bins.
 // Control constructs a new sorter each time. RED reuses one sorter as documented.
 #include <Kokkos_Core.hpp>
@@ -26,15 +26,31 @@ static void set_keys(Keys keys, int round) {
 static void check_permutation(const Sorter& sorter, int round) {
   auto copy = Kokkos::create_mirror_view_and_copy(
       Kokkos::HostSpace{}, sorter.get_permute_vector());
+  // BinSort need not retain stable order for equal keys. Check the
+  // permutation is bijective and ordered by each element's current key.
+  // This is the correct oracle for sort_within_bins=false here:
+  // every bin contains only one distinct key value.
+  bool seen[8] = {};
   for (int i = 0; i < 8; ++i) {
-    int expected = round == 0 ? i : ((i + 4) % 8);
-    if (copy(i) != static_cast<unsigned>(expected)) {
+    const auto raw = copy(i);
+    if (raw >= 8 || seen[raw]) {
       std::fprintf(stderr,
-                   "K09_PERM_MISMATCH round=%d index=%d got=%llu expected=%d\n",
-                   round, i, static_cast<unsigned long long>(copy(i)), expected);
+                   "K09_INVALID_PERM round=%d pos=%d got=%llu duplicate_or_oob\n",
+                   round, i, static_cast<unsigned long long>(raw));
+      std::exit(4);
+    }
+    seen[raw] = true;
+    const bool low_index = raw < 4;
+    const bool expected_low_index = round == 0 ? i < 4 : i >= 4;
+    if (low_index != expected_low_index) {
+      std::fprintf(stderr,
+                   "K09_INVALID_PERM round=%d pos=%d got=%llu wrong_bin\n",
+                   round, i, static_cast<unsigned long long>(raw));
       std::exit(4);
     }
   }
+  for (int i = 0; i < 8; ++i)
+    if (!seen[i]) std::exit(4);
 }
 
 int main(int argc, char** argv) {
