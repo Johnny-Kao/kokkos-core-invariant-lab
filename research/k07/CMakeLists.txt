@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.25)
+project(K07BinSortReuse LANGUAGES CXX)
+find_package(Kokkos CONFIG REQUIRED)
+add_executable(k07_binsort_reuse binsort_reuse.cpp)
+target_compile_features(k07_binsort_reuse PRIVATE cxx_std_20)
+target_link_libraries(k07_binsort_reuse PRIVATE Kokkos::kokkos)
+target_compile_options(k07_binsort_reuse PRIVATE -O1 -g -fno-omit-frame-pointer -fsanitize=address)
+target_link_options(k07_binsort_reuse PRIVATE -fsanitize=address)
