@@ -1,0 +1,84 @@
+name: K04 Transform Inclusive Scan Init Order (Research)
+
+on:
+  push:
+    branches: ["research/k04-transform-inclusive-init-order-20261118"]
+    paths:
+      - ".github/workflows/k04-inclusive-scan-order.yml"
+      - "scan_k04/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k04-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  noncommutative-public-api:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: g++
+            backend: SERIAL
+          - compiler: clang++
+            backend: SERIAL
+          - compiler: g++
+            backend: OPENMP
+    name: "${{ matrix.compiler }} / ${{ matrix.backend }}"
+    env:
+      OMP_NUM_THREADS: "2"
+      OMP_PROC_BIND: "false"
+    steps:
+      - name: Checkout independent Research probes
+        uses: actions/checkout@v4
+      - name: Checkout exact upstream baseline
+        uses: actions/checkout@v4
+        with:
+          repository: kokkos/kokkos
+          ref: e9e05d0ec9fd9ed215d761c34bc0dc42ee4248c1
+          path: kokkos
+          submodules: recursive
+          persist-credentials: false
+      - name: Build and install unmodified Kokkos
+        run: |
+          cmake -S kokkos -B build/kokkos \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+            -DKokkos_ENABLE_SERIAL=ON \
+            -DKokkos_ENABLE_OPENMP=${{ matrix.backend == 'OPENMP' && 'ON' || 'OFF' }} \
+            -DKokkos_ENABLE_TESTS=OFF -DKokkos_ENABLE_EXAMPLES=OFF
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+
+      - name: Compile public API matrix scan test
+        run: |
+          cmake -S scan_k04 -B build/k04 \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
+          cmake --build build/k04 --parallel 2
+
+      - name: Validate expected baseline silent wrong result
+        run: |
+          ./build/k04/k04_scan_probe --expect-red
+
+      - name: Patch only the independent Actions source checkout
+        run: |
+          git -C kokkos apply --check ../scan_k04/candidate/scan-init-order.patch
+          git -C kokkos apply ../scan_k04/candidate/scan-init-order.patch
+          git -C kokkos diff --check
+          git -C kokkos diff -- algorithms/src/std_algorithms/impl/Kokkos_TransformInclusiveScan.hpp
+
+      - name: Rebuild and check candidate against standard oracle
+        run: |
+          cmake --build build/kokkos --parallel 2
+          cmake --install build/kokkos
+          cmake --build build/k04 --clean-first --parallel 2
+          ./build/k04/k04_scan_probe --expect-green
+          echo "K04 public View and TeamPolicy transform_inclusive_scan with init: baseline RED / candidate GREEN; associative noncommutative matrix multiplication, standard C++ reference." >> "$GITHUB_STEP_SUMMARY"
