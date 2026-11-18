@@ -35,6 +35,25 @@ jobs:
           cmake -S research/k07 -B build/k07 -DCMAKE_CXX_COMPILER=g++ \
             -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install"
           cmake --build build/k07 --parallel 2
+      - name: K07-A aligned ranges control
+        run: |
+          timeout 15s ./build/k07/k07_binsort_offset aligned 2>&1 | tee k07-offset-aligned.log
+          grep 'K07_ALIGNED_PASS' k07-offset-aligned.log
+      - name: K07-A different valid range offsets - silent wrong write
+        run: |
+          timeout 15s ./build/k07/k07_binsort_offset silent 2>&1 | tee k07-offset-silent.log
+          grep 'K07_SILENT_WRONG_RANGE_OBSERVED' k07-offset-silent.log
+      - name: K07-A shorter destination - same write-back index ASan OOB
+        run: |
+          set +e
+          timeout 15s ./build/k07/k07_binsort_offset oob > k07-offset-oob.log 2>&1
+          rc=$?
+          set -e
+          cat k07-offset-oob.log
+          echo "K07_OFFSET_OOB_EXIT=$rc" | tee -a k07-offset-oob.log
+          if [[ "$rc" -eq 0 ]]; then echo "K07_OFFSET_OOB_NOT_REPRODUCED"; exit 1; fi
+          if ! grep -q 'heap-buffer-overflow' k07-offset-oob.log; then echo "K07_OFFSET_OOB_UNCLASSIFIED"; exit 1; fi
+          echo "K07_OFFSET_NATIVE_ASAN_RED"
       - name: Control - rebuild sorter for changed keys
         run: |
           timeout 15s ./build/k07/k07_binsort_reuse control 2>&1 | tee k07-control.log
