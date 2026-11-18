@@ -55,19 +55,23 @@ int main(int argc, char** argv) {
   std::array<Matrix, 3> input_data{
       Matrix{1, 1, 0, 1}, Matrix{1, 0, 1, 1}, Matrix{2, 0, 0, 1}};
   const Matrix init{1, 0, 1, 1};
-  std::array<Matrix, 3> oracle, oracle_no_init;
+  std::array<Matrix, 3> oracle, oracle_no_init, exclusive_oracle;
   std::transform_inclusive_scan(
       input_data.begin(), input_data.end(), oracle.begin(), MatMul{},
       Identity{}, init);
   std::transform_inclusive_scan(
       input_data.begin(), input_data.end(), oracle_no_init.begin(), MatMul{},
       Identity{});
+  std::exclusive_scan(input_data.begin(), input_data.end(),
+                      exclusive_oracle.begin(), init, MatMul{});
 
   Kokkos::View<Matrix*, Exec> in("k04-matrices", 3);
   Kokkos::View<Matrix*, Exec> exec_out("k04-exec-out", 3);
   Kokkos::View<Matrix*, Exec> exec_no_init("k04-exec-noinit", 3);
   Kokkos::View<Matrix*, Exec> inclusive_out("k04-inclusive-out", 3);
   Kokkos::View<Matrix*, Exec> inclusive_no_init("k04-inclusive-noinit", 3);
+  Kokkos::View<Matrix*, Exec> exclusive_out("k04-exclusive-out", 3);
+  Kokkos::View<Matrix*, Exec> transform_exclusive_out("k04-transform-exclusive-out", 3);
   auto host_input = Kokkos::create_mirror_view(in);
   for (int i = 0; i < 3; ++i) host_input(i) = input_data[i];
   Kokkos::deep_copy(in, host_input);
@@ -78,6 +82,9 @@ int main(int argc, char** argv) {
 
   KE::inclusive_scan(Exec{}, in, inclusive_out, MatMul{}, init);
   KE::inclusive_scan(Exec{}, in, inclusive_no_init, MatMul{});
+  KE::exclusive_scan(Exec{}, in, exclusive_out, init, MatMul{});
+  KE::transform_exclusive_scan(Exec{}, in, transform_exclusive_out, init,
+                               MatMul{}, Identity{});
   Kokkos::fence();
 
   const auto exec_host =
@@ -89,16 +96,29 @@ int main(int argc, char** argv) {
   const auto inclusive_no_init_host =
       Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, inclusive_no_init);
 
+  const auto exclusive_host =
+      Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace{}, exclusive_out);
+  const auto transform_exclusive_host = Kokkos::create_mirror_view_and_copy(
+      Kokkos::HostSpace{}, transform_exclusive_out);
+
   bool control_ok = true, transform_correct = true, inclusive_correct = true;
+  bool exclusive_correct = true, transform_exclusive_correct = true;
   for (int i = 0; i < 3; ++i) {
     control_ok = control_ok && equal(no_init_host(i), oracle_no_init[i]) &&
                  equal(inclusive_no_init_host(i), oracle_no_init[i]);
     transform_correct = transform_correct && equal(exec_host(i), oracle[i]);
     inclusive_correct = inclusive_correct && equal(inclusive_host(i), oracle[i]);
+    exclusive_correct =
+        exclusive_correct && equal(exclusive_host(i), exclusive_oracle[i]);
+    transform_exclusive_correct = transform_exclusive_correct &&
+        equal(transform_exclusive_host(i), exclusive_oracle[i]);
   }
   print_matrix("oracle_first", oracle[0]);
   print_matrix("transform_first", exec_host(0));
   print_matrix("inclusive_first", inclusive_host(0));
+  print_matrix("exclusive_second_expected", exclusive_oracle[1]);
+  print_matrix("exclusive_second", exclusive_host(1));
+  print_matrix("transform_exclusive_second", transform_exclusive_host(1));
   std::printf("K04_RESULTS control=%d transform_correct=%d inclusive_correct=%d\n",
               int(control_ok), int(transform_correct), int(inclusive_correct));
 
@@ -107,11 +127,13 @@ int main(int argc, char** argv) {
     std::puts("K04_CONTROL_FAILURE: without-init API differs from standard");
     return 3;
   }
-  if (red && !transform_correct && !inclusive_correct) {
+  if (red && !transform_correct && !inclusive_correct &&
+      !exclusive_correct && !transform_exclusive_correct) {
     std::puts("K04_PUBLIC_API_RED: wrong matrix-prefix products, no error");
     return 0;
   }
-  if (!red && transform_correct && inclusive_correct) {
+  if (!red && transform_correct && inclusive_correct &&
+      exclusive_correct && transform_exclusive_correct) {
     std::puts("K04_PUBLIC_API_GREEN: matches standard matrix-prefix products");
     return 0;
   }
