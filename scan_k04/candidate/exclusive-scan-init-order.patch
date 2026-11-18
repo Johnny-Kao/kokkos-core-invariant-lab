@@ -1,0 +1,13 @@
+diff --git a/algorithms/src/std_algorithms/impl/Kokkos_FunctorsForExclusiveScan.hpp b/algorithms/src/std_algorithms/impl/Kokkos_FunctorsForExclusiveScan.hpp
+--- a/algorithms/src/std_algorithms/impl/Kokkos_FunctorsForExclusiveScan.hpp
++++ b/algorithms/src/std_algorithms/impl/Kokkos_FunctorsForExclusiveScan.hpp
+@@ -134,3 +134,3 @@
+       } else {
+-        m_first_dest[i] = m_binary_op(update.val, m_init_value);
++        m_first_dest[i] = m_binary_op(m_init_value, update.val);
+       }
+@@ -192,3 +192,3 @@
+       } else {
+-        m_first_dest[i] = m_binary_op(update, m_init_value);
++        m_first_dest[i] = m_binary_op(m_init_value, update);
+       }
