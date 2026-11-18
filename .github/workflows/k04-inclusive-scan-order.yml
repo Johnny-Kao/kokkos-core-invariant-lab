@@ -72,8 +72,10 @@ jobs:
         run: |
           git -C kokkos apply --check ../scan_k04/candidate/scan-init-order.patch
           git -C kokkos apply ../scan_k04/candidate/scan-init-order.patch
+          git -C kokkos apply --check ../scan_k04/candidate/exclusive-scan-init-order.patch
+          git -C kokkos apply ../scan_k04/candidate/exclusive-scan-init-order.patch
           git -C kokkos diff --check
-          git -C kokkos diff -- algorithms/src/std_algorithms/impl/Kokkos_TransformInclusiveScan.hpp
+          git -C kokkos diff -- algorithms/src/std_algorithms/impl/Kokkos_TransformInclusiveScan.hpp algorithms/src/std_algorithms/impl/Kokkos_FunctorsForExclusiveScan.hpp
 
       - name: Rebuild and check candidate against standard oracle
         run: |
@@ -81,4 +83,4 @@ jobs:
           cmake --install build/kokkos
           cmake --build build/k04 --clean-first --parallel 2
           ./build/k04/k04_scan_probe --expect-green
-          echo "K04 public View transform_inclusive_scan + inclusive_scan with init: baseline RED / candidate GREEN; associative noncommutative matrix multiplication, standard C++ reference." >> "$GITHUB_STEP_SUMMARY"
+          echo "K04 four public View scan APIs (inclusive/exclusive and transform variants) with init: baseline RED / candidate GREEN; associative noncommutative matrix multiplication vs standard C++ oracle." >> "$GITHUB_STEP_SUMMARY"
