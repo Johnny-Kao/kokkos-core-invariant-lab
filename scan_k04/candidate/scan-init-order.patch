@@ -1,0 +1,19 @@
+diff --git a/algorithms/src/std_algorithms/impl/Kokkos_TransformInclusiveScan.hpp b/algorithms/src/std_algorithms/impl/Kokkos_TransformInclusiveScan.hpp
+--- a/algorithms/src/std_algorithms/impl/Kokkos_TransformInclusiveScan.hpp
++++ b/algorithms/src/std_algorithms/impl/Kokkos_TransformInclusiveScan.hpp
+@@ -101,7 +101,7 @@ struct ExeSpaceTransformInclusiveScanWithInitValueFunctor {
+     this->join(update, tmp);
+ 
+     if (final_pass) {
+-      m_first_dest[i] = m_binary_op(update.val, m_init);
++      m_first_dest[i] = m_binary_op(m_init, update.val);
+     }
+   }
+@@ -277,7 +277,7 @@ struct TeamTransformInclusiveScanWithInitValueFunctor {
+     this->join(update, tmp);
+ 
+     if (final_pass) {
+-      m_first_dest[i] = m_binary_op(update, m_init);
++      m_first_dest[i] = m_binary_op(m_init, update);
+     }
+   }
