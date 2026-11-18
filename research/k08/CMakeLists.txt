@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.25)
+project(KokkosK08CrsTransposeNative LANGUAGES CXX)
+find_package(Kokkos CONFIG REQUIRED)
+add_executable(k08_crs_transpose_native crs_transpose_native.cpp)
+target_link_libraries(k08_crs_transpose_native PRIVATE Kokkos::kokkos)
+target_compile_features(k08_crs_transpose_native PRIVATE cxx_std_20)
+target_compile_options(k08_crs_transpose_native PRIVATE -O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined)
+target_link_options(k08_crs_transpose_native PRIVATE -fsanitize=address,undefined)
