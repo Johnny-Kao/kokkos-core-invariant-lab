@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.25)
+project(kokkos_k05_backward_overlap LANGUAGES CXX)
+find_package(Kokkos CONFIG REQUIRED)
+add_executable(k05_backward_probe probe.cpp)
+target_compile_features(k05_backward_probe PRIVATE cxx_std_20)
+target_link_libraries(k05_backward_probe PRIVATE Kokkos::kokkos)
+target_compile_options(k05_backward_probe PRIVATE -O2 -g -fno-omit-frame-pointer)
