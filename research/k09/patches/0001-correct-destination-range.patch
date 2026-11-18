@@ -1,0 +1,14 @@
+diff --git a/algorithms/src/sorting/Kokkos_BinSortPublicAPI.hpp b/algorithms/src/sorting/Kokkos_BinSortPublicAPI.hpp
+--- a/algorithms/src/sorting/Kokkos_BinSortPublicAPI.hpp
++++ b/algorithms/src/sorting/Kokkos_BinSortPublicAPI.hpp
+@@ -306,9 +306,9 @@
+     }
+ 
+     {
+       copy_functor<ValuesViewType, scratch_view_type> functor(
+-          values, range_begin, sorted_values);
++          values, values_range_begin, sorted_values);
+ 
+       parallel_for(
+           "Kokkos::Sort::Copy",
+           Kokkos::RangePolicy<ExecutionSpace, Kokkos::IndexType<int64_t>>(
